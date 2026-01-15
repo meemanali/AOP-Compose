@@ -1,0 +1,168 @@
+import jdk.internal.org.jline.utils.Log
+
+buildscript {
+    repositories {
+        maven { url 'https://maven.aliyun.com/nexus/content/groups/public/' }
+        google()
+        mavenCentral()
+    }
+}
+
+// Create weaving configuration once
+def weavingConfig = configurations.maybeCreate("weaving")
+dependencies {
+    weaving 'org.aspectj:aspectjtools:1.9.25.1'
+    weaving 'org.aspectj:aspectjweaver:1.9.25.1'
+}
+
+// Handle both app and library modules
+def variants = project.android.hasProperty("applicationVariants")
+        ? project.android.applicationVariants
+        : project.android.libraryVariants
+
+variants.all { variant ->
+    variant.outputs.all { output ->
+        // Generate full variant name
+        def fullName = output.name.tokenize('-').withIndex().collect { token, index ->
+            index == 0 ? token : token.capitalize()
+        }.join('')
+
+        JavaCompile javaCompile = variant.javaCompileProvider.get()
+        javaCompile.doLast {
+            // Java compilation arguments
+            String[] javaArgs = [
+                    "-showWeaveInfo",
+                    "-1.8",
+                    "-inpath", javaCompile.destinationDir.toString(),
+                    "-aspectpath", javaCompile.classpath.asPath,
+                    "-d", javaCompile.destinationDir.toString(),
+                    "-classpath", javaCompile.classpath.asPath,
+                    "-bootclasspath", project.android.bootClasspath.join(File.pathSeparator)
+            ]
+
+            // Kotlin classes path
+            def kotlinClassesDir = new File(project.buildDir, "tmp/kotlin-classes/$fullName")
+
+            String[] kotlinArgs = [
+                    "-showWeaveInfo",
+                    "-1.8",
+                    "-inpath", kotlinClassesDir.absolutePath,
+                    "-aspectpath", javaCompile.classpath.asPath,
+                    "-d", kotlinClassesDir.absolutePath,
+                    "-classpath", javaCompile.classpath.asPath,
+                    "-bootclasspath", project.android.bootClasspath.join(File.pathSeparator)
+            ]
+
+            println "=== AspectJ Weaving ==="
+            println "Java classes: ${javaCompile.destinationDir}"
+            println "Kotlin classes: ${kotlinClassesDir}"
+
+            // Weave Java classes
+            if (javaCompile.destinationDir.exists()) {
+                println "Weaving Java classes..."
+                try {
+                    javaexec {
+                        classpath = weavingConfig
+                        main = "org.aspectj.tools.ajc.Main"
+                        args javaArgs
+                    }
+                    println "Java weaving completed successfully"
+                } catch (Exception e) {
+                    println "Warning: Java weaving failed - ${e.message}"
+                }
+            } else {
+                println "Skipping Java weaving - no classes found"
+            }
+
+            // Weave Kotlin classes
+            if (kotlinClassesDir.exists()) {
+                Log.debug("Weaving Kotlin classes...")
+                println "Weaving Kotlin classes..."
+                try {
+                    javaexec {
+                        classpath = weavingConfig
+                        main = "org.aspectj.tools.ajc.Main"
+                        args kotlinArgs
+                    }
+                    println "Kotlin weaving completed successfully"
+                } catch (Exception e) {
+                    Log.debug("Warning: Kotlin weaving failed - ${e.message}")
+                    println "Warning: Kotlin weaving failed - ${e.message}"
+                }
+            } else {
+                Log.debug("Skipping Kotlin weaving - no classes found")
+                println "Skipping Kotlin weaving - no classes found"
+            }
+        }
+    }
+}
+
+
+//buildscript {
+//    repositories {
+//        maven { url 'https://maven.aliyun.com/nexus/content/groups/public/' }
+//        google()
+//        mavenCentral()
+//    }
+//
+//}
+//
+//// app 和 lib 属性不同
+//def variants = null
+//if (project.android.hasProperty("applicationVariants")) {
+//    variants = project.android.applicationVariants
+//} else if (project.android.hasProperty("libraryVariants")) {
+//    variants = project.android.libraryVariants
+//}
+//
+//variants.all { variant ->
+//    variant.outputs.all { output ->
+//        def fullName = ""
+//        output.name.tokenize('-').eachWithIndex { token, index ->
+//            fullName = fullName + (index == 0 ? token : token.capitalize())
+//        }
+//
+//        JavaCompile javaCompile = variant.javaCompileProvider.get()
+//        javaCompile.doLast {
+//            String[] javaArgs = ["-showWeaveInfo",
+//                "-1.8",
+//                "-inpath", javaCompile.destinationDir.toString(),
+//                "-aspectpath", javaCompile.classpath.asPath,
+//                "-d", javaCompile.destinationDir.toString(),
+//                "-classpath", javaCompile.classpath.asPath,
+//                "-bootclasspath", project.android.bootClasspath.join(File.pathSeparator)]
+//            println "ajc javaArgs: " + Arrays.toString(javaArgs)
+//            String[] kotlinArgs = ["-showWeaveInfo",
+//                "-1.8",
+//                "-inpath", project.buildDir.path + "/tmp/kotlin-classes/" + fullName,
+//                "-aspectpath", javaCompile.classpath.asPath,
+//                "-d", project.buildDir.path + "/tmp/kotlin-classes/" + fullName,
+//                "-classpath", javaCompile.classpath.asPath,
+//                "-bootclasspath", project.android.bootClasspath.join(
+//                    File.pathSeparator)]
+//            println "ajc kotlinArgs: " + Arrays.toString(kotlinArgs)
+//
+//            def wv = configurations.create("weaving")
+//            dependencies {
+//                //noinspection UseTomlInstead
+//                weaving 'org.aspectj:aspectjtools:1.9.8'
+//            }
+//            try {
+//                javaexec {
+//                    classpath = wv
+//                    main = "org.aspectj.tools.ajc.Main"
+//                    args javaArgs
+//                }
+//            } catch (Exception ignored) {
+//            }
+//            try {
+//                javaexec {
+//                    classpath = wv
+//                    main = "org.aspectj.tools.ajc.Main"
+//                    args kotlinArgs
+//                }
+//            } catch (Exception ignored) {
+//            }
+//        }
+//    }
+//}
